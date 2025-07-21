@@ -26,3 +26,21 @@ style:
   # by default highlighting color is not used.
   color_scheme: ~
   # color_scheme: aqua
+
+applications:
+  firefox:
+    style:
+      preedit_style: preview
+      cursor_type: select
+      color_scheme: aqua
+
+  code:
+    style:
+      inline_preedit: false
+      preedit_style: composition
+      horizontal: true
+
+  terminal:
+    style:
+      preedit_style: composition
+      color_scheme: ink

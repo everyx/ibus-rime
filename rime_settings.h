@@ -2,6 +2,7 @@
 #define __IBUS_RIME_SETTINGS_H__
 
 #include <ibus.h>
+#include <glib.h>
 
 // colors
 #define RIME_COLOR_LIGHT  0xd4d4d4
@@ -32,7 +33,17 @@ struct IBusRimeSettings {
   struct ColorSchemeDefinition* color_scheme;
 };
 
-extern struct IBusRimeSettings g_ibus_rime_settings;
+struct AppSpecificSettings {  
+  gchar* app_id;  
+  struct IBusRimeSettings settings;  
+};
+
+struct AppSettingsManager {  
+  GHashTable* app_settings;  // app_id -> IBusRimeSettings  
+  struct IBusRimeSettings default_settings;  
+};
+
+extern struct IBusRimeSettings settings;
 
 void
 ibus_rime_load_settings();

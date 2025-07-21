@@ -20,6 +20,10 @@ struct _IBusRimeEngine {
   RimeStatus status;
   IBusLookupTable* table;
   IBusPropList* props;
+
+  // 新增：当前应用程序ID和设置
+  gchar* current_app_id;
+  struct IBusRimeSettings* current_settings;
 };
 
 struct _IBusRimeEngineClass {
@@ -90,16 +94,25 @@ static void
 ibus_rime_create_session (IBusRimeEngine *rime_engine)
 {
   rime_engine->session_id = rime_api->create_session();
+
+  // 使用当前应用程序的设置，如果没有则使用全局设置
+  struct IBusRimeSettings* settings = rime_engine->current_settings ? 
+      rime_engine->current_settings : &settings;
+
   Bool inline_caret =
-      g_ibus_rime_settings.embed_preedit_text &&
-      g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION &&
-      g_ibus_rime_settings.cursor_type == CURSOR_TYPE_INSERT;
+      settings.embed_preedit_text &&
+      settings.preedit_style == PREEDIT_STYLE_COMPOSITION &&
+      settings.cursor_type == CURSOR_TYPE_INSERT;
   rime_api->set_option(rime_engine->session_id, "soft_cursor", !inline_caret);
 }
 
 static void
 ibus_rime_engine_init (IBusRimeEngine *rime_engine)
 {
+  // 初始化新增字段
+  rime_engine->current_app_id = NULL;
+  rime_engine->current_settings = NULL;
+
   ibus_rime_create_session(rime_engine);
 
   RIME_STRUCT_INIT(RimeStatus, rime_engine->status);
@@ -160,6 +173,13 @@ ibus_rime_engine_destroy (IBusRimeEngine *rime_engine)
     rime_engine->session_id = 0;
   }
 
+  // 清理新增字段
+  if (rime_engine->current_app_id) {
+    g_free(rime_engine->current_app_id);
+    rime_engine->current_app_id = NULL;
+  }
+  rime_engine->current_settings = NULL;
+
   if (rime_engine->status.schema_id) {
     g_free(rime_engine->status.schema_id);
   }
@@ -186,6 +206,33 @@ static void
 ibus_rime_engine_focus_in (IBusEngine *engine)
 {
   IBusRimeEngine *rime_engine = (IBusRimeEngine *)engine;
+
+  // 获取当前聚焦的应用程序ID
+  const gchar* app_id = NULL;
+  if (IBUS_IS_ENGINE(engine)) {
+    // 使用 IBus 提供的方法获取应用程序ID
+    IBusInputContext* context = ibus_engine_get_input_context(engine);
+    if (context) {
+      app_id = ibus_input_context_get_client_commit_preedit(context) ? 
+               ibus_input_context_get_client_name(context) : NULL;
+    }
+  }
+
+  // 如果应用程序ID发生变化，更新设置
+  if (g_strcmp0(rime_engine->current_app_id, app_id) != 0) {
+    g_free(rime_engine->current_app_id);
+    rime_engine->current_app_id = g_strdup(app_id);
+    rime_engine->current_settings = ibus_rime_get_app_settings(app_id);
+
+    g_debug("focus_in: app_id changed to %s", app_id ? app_id : "default");
+
+    // 如果已有会话，需要重新创建以应用新设置
+    if (rime_engine->session_id) {
+      rime_api->destroy_session(rime_engine->session_id);
+      rime_engine->session_id = 0;
+    }
+  }
+
   ibus_engine_register_properties(engine, rime_engine->props);
   if (!rime_engine->session_id) {
     ibus_rime_create_session(rime_engine);
@@ -282,6 +329,10 @@ static void ibus_rime_update_status(IBusRimeEngine *rime_engine,
 
 static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
 {
+  // 获取当前应用程序的设置  
+  struct IBusRimeSettings* settings = rime_engine->current_settings ?
+      rime_engine->current_settings : &settings;
+
   // update properties
   RIME_STRUCT(RimeStatus, status);
   if (rime_api->get_status(rime_engine->session_id, &status)) {
@@ -323,14 +374,14 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
       (context.composition.sel_start < context.composition.sel_end);
 
   // display preview text inline, if the commit_text_preview API is supported.
-  if (g_ibus_rime_settings.embed_preedit_text &&
-      g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_PREVIEW &&
+  if (settings.embed_preedit_text &&
+      settings.preedit_style == PREEDIT_STYLE_PREVIEW &&
       RIME_STRUCT_HAS_MEMBER(context, context.commit_text_preview) &&
       context.commit_text_preview) {
     inline_text = ibus_text_new_from_string(context.commit_text_preview);
     const guint inline_text_len = ibus_text_get_length(inline_text);
     inline_cursor_pos =
-        g_ibus_rime_settings.cursor_type == CURSOR_TYPE_SELECT ?
+        settings.cursor_type == CURSOR_TYPE_SELECT ?
         g_utf8_strlen(context.composition.preedit,
                       context.composition.sel_start) :
         inline_text_len;
@@ -342,18 +393,18 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
     // show the unconverted range of preedit text as auxiliary text
     if (has_highlighted_span) {
       preedit_offset = context.composition.sel_start;
-      if (g_ibus_rime_settings.color_scheme) {
+      if (settings.color_scheme) {
         const guint start = g_utf8_strlen(
             context.composition.preedit, context.composition.sel_start);
         const guint end = inline_text_len;
         ibus_attr_list_append(
             inline_text->attrs,
             ibus_attr_foreground_new(
-                g_ibus_rime_settings.color_scheme->text_color, start, end));
+                settings.color_scheme->text_color, start, end));
         ibus_attr_list_append(
             inline_text->attrs,
             ibus_attr_background_new(
-                g_ibus_rime_settings.color_scheme->back_color, start, end));
+                settings.color_scheme->back_color, start, end));
       }
     } else {
       // hide auxiliary text
@@ -361,12 +412,12 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
     }
   }
   // display preedit text inline
-  else if (g_ibus_rime_settings.embed_preedit_text &&
-           g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION) {
+  else if (settings.embed_preedit_text &&
+           settings.preedit_style == PREEDIT_STYLE_COMPOSITION) {
     inline_text = ibus_text_new_from_string(context.composition.preedit);
     const guint inline_text_len = ibus_text_get_length(inline_text);
     inline_cursor_pos =
-        g_ibus_rime_settings.cursor_type == CURSOR_TYPE_SELECT ?
+        settings.cursor_type == CURSOR_TYPE_SELECT ?
         g_utf8_strlen(context.composition.preedit,
                       context.composition.sel_start) :
         g_utf8_strlen(context.composition.preedit,
@@ -376,7 +427,7 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
         inline_text->attrs,
         ibus_attr_underline_new(
             IBUS_ATTR_UNDERLINE_SINGLE, 0, inline_text_len));
-    if (has_highlighted_span && g_ibus_rime_settings.color_scheme) {
+    if (has_highlighted_span && settings.color_scheme) {
       const guint start = g_utf8_strlen(
           context.composition.preedit, context.composition.sel_start);
       const glong end = g_utf8_strlen(
@@ -384,11 +435,11 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
       ibus_attr_list_append(
           inline_text->attrs,
           ibus_attr_foreground_new(
-              g_ibus_rime_settings.color_scheme->text_color, start, end));
+              settings.color_scheme->text_color, start, end));
       ibus_attr_list_append(
           inline_text->attrs,
           ibus_attr_background_new(
-              g_ibus_rime_settings.color_scheme->back_color, start, end));
+              settings.color_scheme->back_color, start, end));
     }
     preedit_offset = context.composition.length;
   }
@@ -494,7 +545,7 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
           rime_engine->table, context.menu.highlighted_candidate_index);
     }
     ibus_lookup_table_set_orientation(
-        rime_engine->table, g_ibus_rime_settings.lookup_table_orientation);
+        rime_engine->table, settings.lookup_table_orientation);
     ibus_engine_update_lookup_table(
         (IBusEngine *)rime_engine, rime_engine->table, TRUE);
   }
@@ -516,7 +567,7 @@ ibus_rime_engine_process_key_event (IBusEngine *engine,
   if (modifiers & (IBUS_SUPER_MASK | IBUS_MOD4_MASK)) {
     return FALSE;
   }
-  
+
   IBusRimeEngine *rime_engine = (IBusRimeEngine *)engine;
 
   modifiers &= (IBUS_RELEASE_MASK | IBUS_LOCK_MASK | IBUS_SHIFT_MASK |

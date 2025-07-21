@@ -126,8 +126,11 @@ static void rime_with_ibus() {
   ibus_rime_start(full_check);
   ibus_rime_load_settings();
 
+  ibus_rime_init_app_settings_manager();
+
   ibus_main();
 
+  ibus_rime_cleanup_app_settings_manager();
   ibus_rime_stop();
   notify_uninit();
 
