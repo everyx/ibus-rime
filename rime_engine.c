@@ -20,6 +20,7 @@ struct _IBusRimeEngine {
   RimeStatus status;
   IBusLookupTable* table;
   IBusPropList* props;
+  gchar* current_app_id;
 };
 
 struct _IBusRimeEngineClass {
@@ -34,7 +35,9 @@ static gboolean ibus_rime_engine_process_key_event (IBusEngine *engine,
                                                     guint keyval,
                                                     guint keycode,
                                                     guint modifiers);
-static void ibus_rime_engine_focus_in (IBusEngine *engine);
+static void ibus_rime_engine_focus_in_id (IBusEngine *engine,
+                                          const gchar *object_path,
+                                          const gchar *client_name);
 static void ibus_rime_engine_focus_out (IBusEngine *engine);
 static void ibus_rime_engine_reset (IBusEngine *engine);
 static void ibus_rime_engine_enable (IBusEngine *engine);
@@ -75,7 +78,7 @@ ibus_rime_engine_class_init (IBusRimeEngineClass *klass)
   ibus_object_class->destroy = (IBusObjectDestroyFunc) ibus_rime_engine_destroy;
 
   engine_class->process_key_event = ibus_rime_engine_process_key_event;
-  engine_class->focus_in = ibus_rime_engine_focus_in;
+  engine_class->focus_in_id = ibus_rime_engine_focus_in_id;
   engine_class->focus_out = ibus_rime_engine_focus_out;
   engine_class->reset = ibus_rime_engine_reset;
   engine_class->enable = ibus_rime_engine_enable;
@@ -101,6 +104,7 @@ static void
 ibus_rime_engine_init (IBusRimeEngine *rime_engine)
 {
   ibus_rime_create_session(rime_engine);
+  rime_engine->current_app_id = NULL;
 
   RIME_STRUCT_INIT(RimeStatus, rime_engine->status);
   RIME_STRUCT_CLEAR(rime_engine->status);
@@ -178,14 +182,27 @@ ibus_rime_engine_destroy (IBusRimeEngine *rime_engine)
     rime_engine->props = NULL;
   }
 
+  if (rime_engine->current_app_id) {
+    g_free(rime_engine->current_app_id);
+  }
+
   ((IBusObjectClass *) ibus_rime_engine_parent_class)->destroy(
       (IBusObject *)rime_engine);
 }
 
 static void
-ibus_rime_engine_focus_in (IBusEngine *engine)
+ibus_rime_engine_focus_in_id (IBusEngine *engine,
+                              const gchar *object_path,
+                              const gchar *client_name)
 {
   IBusRimeEngine *rime_engine = (IBusRimeEngine *)engine;
+
+  if (rime_engine->current_app_id) {
+    g_free(rime_engine->current_app_id);
+  }
+  rime_engine->current_app_id = g_strdup(client_name);
+  ibus_rime_load_settings(client_name, FALSE);
+
   ibus_engine_register_properties(engine, rime_engine->props);
   if (!rime_engine->session_id) {
     ibus_rime_create_session(rime_engine);
@@ -539,12 +556,9 @@ static void ibus_rime_engine_property_activate (IBusEngine *engine,
                                                 const gchar *prop_name,
                                                 guint prop_state)
 {
-  extern void ibus_rime_start(gboolean full_check);
-  extern void ibus_rime_stop();
   IBusRimeEngine *rime_engine = (IBusRimeEngine *)engine;
   if (!strcmp("deploy", prop_name)) {
-    ibus_rime_stop();
-    ibus_rime_start(TRUE);
+    ibus_rime_deploy(rime_engine->current_app_id);
     ibus_rime_engine_update(rime_engine);
   }
   else if (!strcmp("sync", prop_name)) {

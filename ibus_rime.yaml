@@ -26,3 +26,8 @@ style:
   # by default highlighting color is not used.
   color_scheme: ~
   # color_scheme: aqua
+
+app_options:
+  firefox:
+    style:
+      inline_preedit: false

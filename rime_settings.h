@@ -32,9 +32,18 @@ struct IBusRimeSettings {
   struct ColorSchemeDefinition* color_scheme;
 };
 
+struct IBusRimeAppSettings {
+  gchar* app_id;
+  struct IBusRimeSettings settings;
+};
+
 extern struct IBusRimeSettings g_ibus_rime_settings;
+extern GHashTable* g_app_settings_cache;
 
 void
-ibus_rime_load_settings();
+ibus_rime_load_settings(const gchar* app_id, gboolean force_reload);
+
+void
+ibus_rime_deploy(const gchar* app_id);
 
 #endif

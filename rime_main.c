@@ -35,6 +35,8 @@ static void show_message(const char* summary, const char* details) {
   g_object_unref(notice);
 }
 
+static gchar* g_app_id_on_deploy = NULL;
+
 static void notification_handler(void* context_object,
                                  RimeSessionId session_id,
                                  const char* message_type,
@@ -45,7 +47,11 @@ static void notification_handler(void* context_object,
     }
     else if (!strcmp(message_value, "success")) {
       show_message(_("Rime is ready."), NULL);
-      ibus_rime_load_settings();
+      if (g_app_id_on_deploy) {
+          ibus_rime_load_settings(g_app_id_on_deploy, TRUE);
+          g_free(g_app_id_on_deploy);
+          g_app_id_on_deploy = NULL;
+      }
     }
     else if (!strcmp(message_value, "failure")) {
       show_message(_("Rime has encountered an error."),
@@ -86,6 +92,16 @@ void ibus_rime_stop() {
   }
 }
 
+void ibus_rime_deploy(const gchar* app_id) {
+    if (g_app_id_on_deploy) {
+        g_free(g_app_id_on_deploy);
+    }
+    g_app_id_on_deploy = g_strdup(app_id);
+
+    ibus_rime_stop();
+    ibus_rime_start(TRUE);
+}
+
 static void ibus_disconnect_cb(IBusBus *bus, gpointer user_data) {
   g_debug("bus disconnected");
   ibus_quit();
@@ -124,7 +140,7 @@ static void rime_with_ibus() {
 
   gboolean full_check = FALSE;
   ibus_rime_start(full_check);
-  ibus_rime_load_settings();
+  ibus_rime_load_settings("", FALSE);
 
   ibus_main();
 
