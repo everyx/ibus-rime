@@ -17,15 +17,9 @@ enum PreeditStyle {
   PREEDIT_STYLE_PREVIEW,
 };
 
-enum CursorType {
-  CURSOR_TYPE_INSERT,
-  CURSOR_TYPE_SELECT,
-};
-
 struct IBusRimeSettings {
   gboolean embed_preedit_text;
   gint preedit_style;
-  gint cursor_type;
   gint lookup_table_orientation;
   gboolean status_hint;
 };

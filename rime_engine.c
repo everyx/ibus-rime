@@ -434,11 +434,10 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
       context.commit_text_preview) {
     inline_text = ibus_text_new_from_string(context.commit_text_preview);
     const guint inline_text_len = ibus_text_get_length(inline_text);
-    inline_cursor_pos =
-        g_ibus_rime_settings.cursor_type == CURSOR_TYPE_SELECT ?
-        g_utf8_strlen(context.composition.preedit,
-                      context.composition.sel_start) :
-        inline_text_len;
+    // The caret goes at the end of the text we send: clients put their own
+    // composition selection at cursor_pos and derive the range they replace
+    // from it, so it has to be a position inside that text.
+    inline_cursor_pos = inline_text_len;
     inline_text->attrs = ibus_attr_list_new();
     ibus_attr_list_append(
         inline_text->attrs,
@@ -462,12 +461,9 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
            g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION) {
     inline_text = ibus_text_new_from_string(context.composition.preedit);
     const guint inline_text_len = ibus_text_get_length(inline_text);
-    inline_cursor_pos =
-        g_ibus_rime_settings.cursor_type == CURSOR_TYPE_SELECT ?
-        g_utf8_strlen(context.composition.preedit,
-                      context.composition.sel_start) :
-        g_utf8_strlen(context.composition.preedit,
-                      context.composition.cursor_pos);
+    // composition.cursor_pos is the caret in the preedit, in bytes.
+    inline_cursor_pos = g_utf8_strlen(context.composition.preedit,
+                                      context.composition.cursor_pos);
     inline_text->attrs = ibus_attr_list_new();
     ibus_attr_list_append(
         inline_text->attrs,
