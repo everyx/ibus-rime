@@ -7,6 +7,10 @@
 
 extern RimeApi *rime_api;
 
+// U+2038 CARET, the glyph rime's soft cursor inserts into the preedit. The
+// engine marks the insertion point itself, in the text the panel draws.
+static const gchar *const kCaretMark = "\xe2\x80\xb8";
+
 typedef struct _IBusRimeEngine IBusRimeEngine;
 typedef struct _IBusRimeEngineClass IBusRimeEngineClass;
 
@@ -89,11 +93,11 @@ static void
 ibus_rime_create_session (IBusRimeEngine *rime_engine)
 {
   rime_engine->session_id = rime_api->create_session();
-  Bool inline_caret =
-      g_ibus_rime_settings.embed_preedit_text &&
-      g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION &&
-      g_ibus_rime_settings.cursor_type == CURSOR_TYPE_INSERT;
-  rime_api->set_option(rime_engine->session_id, "soft_cursor", !inline_caret);
+  // rime's soft cursor is a character inserted into the preedit string, so it
+  // reaches the client whenever that string is drawn there. The insertion mark
+  // belongs to the auxiliary text instead (see ibus_rime_engine_update); keep
+  // the option off in case a schema turns it on.
+  rime_api->set_option(rime_engine->session_id, "soft_cursor", False);
 }
 
 static void
@@ -411,7 +415,12 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
   // calculate auxiliary text
   if (preedit_offset < context.composition.length) {
     const char* preedit = context.composition.preedit + preedit_offset;
-    auxiliary_text = ibus_text_new_from_string(preedit);
+    // The insertion mark goes into the line the panel draws, not into the text
+    // a client renders. It trails the text because the caret is at the end of
+    // the preedit here, which also leaves the attribute ranges below unchanged.
+    gchar* marked = g_strconcat(preedit, kCaretMark, NULL);
+    auxiliary_text = ibus_text_new_from_string(marked);
+    g_free(marked);
     // glong preedit_len = g_utf8_strlen(preedit, -1);
     // glong cursor_pos = g_utf8_strlen(
     //    preedit, context.composition.cursor_pos - preedit_offset);
