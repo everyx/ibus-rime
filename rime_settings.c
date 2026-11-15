@@ -8,7 +8,6 @@ extern RimeApi *rime_api;
 static struct IBusRimeSettings ibus_rime_settings_default = {
   .embed_preedit_text = TRUE,
   .preedit_style = PREEDIT_STYLE_COMPOSITION,
-  .cursor_type = CURSOR_TYPE_INSERT,
   .lookup_table_orientation = IBUS_ORIENTATION_SYSTEM,
   .status_hint = FALSE,
 };
@@ -39,16 +38,6 @@ ibus_rime_load_settings()
       g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_COMPOSITION;
     } else if(!strcmp(preedit_style_str, "preview")) {
       g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_PREVIEW;
-    }
-  }
-
-  const char* cursor_type_str =
-      rime_api->config_get_cstring(&config, "style/cursor_type");
-  if (cursor_type_str) {
-    if (!strcmp(cursor_type_str, "insert")) {
-      g_ibus_rime_settings.cursor_type = CURSOR_TYPE_INSERT;
-    } else if (!strcmp(cursor_type_str, "select")) {
-      g_ibus_rime_settings.cursor_type = CURSOR_TYPE_SELECT;
     }
   }
 

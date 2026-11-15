@@ -15,11 +15,5 @@ style:
   # preview the converted text.
   preedit_style: preview
 
-  # `cursor_type` specifies where the inline cursor is located.
-  # inline cursor is at the insertion point.
-  cursor_type: insert
-  # inline cursor is at the beginning of text under conversion.
-  #cursor_type: select
-
   # display updated IME status at cursor position.
   status_hint: true
