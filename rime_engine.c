@@ -320,7 +320,14 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
   RIME_STRUCT(RimeContext, context);
   if (!rime_api->get_context(rime_engine->session_id, &context) ||
       context.composition.length == 0) {
-    ibus_engine_hide_preedit_text((IBusEngine *)rime_engine);
+    // Clear the preedit text, don't only hide it. The gtk ibus module replaces
+    // the string it caches for the client on an update, not on a hide, so a
+    // client that commits the composition when the preedit ends can commit
+    // whatever was left of it (the same reason ibus clears the string in its
+    // own ibus_im_context_clear_preedit_text()).
+    ibus_engine_update_preedit_text_with_mode(
+        (IBusEngine *)rime_engine, ibus_text_new_from_static_string(""), 0,
+        FALSE, IBUS_ENGINE_PREEDIT_CLEAR);
     // Case 1: no composition — hide preedit/candidates, then show the mode hint
     // if a change is pending; otherwise clear any leftover auxiliary text.
     if (!ibus_rime_status_hint_show(&rime_engine->hint, (IBusEngine *)rime_engine,
