@@ -12,14 +12,9 @@
 #define RIME_COLOR_DARK   0x606060
 #define RIME_COLOR_BLACK  0x000000
 
-enum PreeditStyle {
-  PREEDIT_STYLE_COMPOSITION,
-  PREEDIT_STYLE_PREVIEW,
-};
-
 struct IBusRimeSettings {
   gboolean embed_preedit_text;
-  gint preedit_style;
+  gboolean aux_preedit;
   gint lookup_table_orientation;
   gboolean status_hint;
 };

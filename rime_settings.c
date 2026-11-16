@@ -7,7 +7,7 @@ extern RimeApi *rime_api;
 
 static struct IBusRimeSettings ibus_rime_settings_default = {
   .embed_preedit_text = TRUE,
-  .preedit_style = PREEDIT_STYLE_COMPOSITION,
+  .aux_preedit = TRUE,
   .lookup_table_orientation = IBUS_ORIENTATION_SYSTEM,
   .status_hint = FALSE,
 };
@@ -31,14 +31,9 @@ ibus_rime_load_settings()
     g_ibus_rime_settings.embed_preedit_text = !!inline_preedit;
   }
 
-  const char* preedit_style_str =
-      rime_api->config_get_cstring(&config, "style/preedit_style");
-  if(preedit_style_str) {
-    if(!strcmp(preedit_style_str, "composition")) {
-      g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_COMPOSITION;
-    } else if(!strcmp(preedit_style_str, "preview")) {
-      g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_PREVIEW;
-    }
+  Bool aux_preedit = False;
+  if (rime_api->config_get_bool(&config, "style/aux_preedit", &aux_preedit)) {
+    g_ibus_rime_settings.aux_preedit = !!aux_preedit;
   }
 
   Bool horizontal = False;

@@ -9,11 +9,9 @@ style:
   # embed preedit text in the input field (false|true).
   inline_preedit: true
 
-  # `preedit_style` specifies what to display as inline preedit text.
-  # display inline the input under conversion.
-  #preedit_style: composition
-  # preview the converted text.
-  preedit_style: preview
+  # `aux_preedit` shows what the schema made of the input above the candidates
+  # (tone marks, the script the input is written to, converted segments).
+  aux_preedit: true
 
   # display updated IME status at cursor position.
   status_hint: true

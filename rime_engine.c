@@ -7,10 +7,6 @@
 
 extern RimeApi *rime_api;
 
-// U+2038 CARET, the glyph rime's soft cursor inserts into the preedit. The
-// engine marks the insertion point itself, in the text the panel draws.
-static const gchar *const kCaretMark = "\xe2\x80\xb8";
-
 typedef struct _IBusRimeEngine IBusRimeEngine;
 typedef struct _IBusRimeEngineClass IBusRimeEngineClass;
 
@@ -422,85 +418,43 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
   IBusText* inline_text = NULL;
   IBusText* auxiliary_text = NULL;
   guint inline_cursor_pos = 0;
-  int preedit_offset = 0;
 
-  const gboolean has_highlighted_span =
-      (context.composition.sel_start < context.composition.sel_end);
-
-  // display preview text inline, if the commit_text_preview API is supported.
-  if (g_ibus_rime_settings.embed_preedit_text &&
-      g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_PREVIEW &&
-      RIME_STRUCT_HAS_MEMBER(context, context.commit_text_preview) &&
-      context.commit_text_preview) {
-    inline_text = ibus_text_new_from_string(context.commit_text_preview);
+  // The client draws the raw input; the line the panel draws carries what the
+  // schema made of it. For most schemas the two differ only in the syllable
+  // spacing, for others the preedit has the tone marks or the script the input
+  // is written to (bopomofo), which is why it is worth a line of its own.
+  const gchar* raw_input = rime_api->get_input(rime_engine->session_id);
+  if (g_ibus_rime_settings.embed_preedit_text && raw_input && *raw_input) {
+    inline_text = ibus_text_new_from_string(raw_input);
     const guint inline_text_len = ibus_text_get_length(inline_text);
-    // The caret goes at the end of the text we send: clients put their own
-    // composition selection at cursor_pos and derive the range they replace
-    // from it, so it has to be a position inside that text.
-    inline_cursor_pos = inline_text_len;
+    // the caret is a byte offset into the raw input
+    const guint caret = g_utf8_strlen(
+        raw_input, rime_api->get_caret_pos(rime_engine->session_id));
+    inline_cursor_pos = MIN(caret, inline_text_len);
     inline_text->attrs = ibus_attr_list_new();
     ibus_attr_list_append(
         inline_text->attrs,
         ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, inline_text_len));
-    // show the unconverted range of preedit text as auxiliary text
-    if (has_highlighted_span) {
-      preedit_offset = context.composition.sel_start;
-      const guint start = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_start);
-      const guint end = inline_text_len;
-      ibus_attr_list_append(
-          inline_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SUFFIX, start, end));
-    } else {
-      // hide auxiliary text
-      preedit_offset = context.composition.length;
-    }
-  }
-  // display preedit text inline
-  else if (g_ibus_rime_settings.embed_preedit_text &&
-           g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION) {
-    inline_text = ibus_text_new_from_string(context.composition.preedit);
-    const guint inline_text_len = ibus_text_get_length(inline_text);
-    // composition.cursor_pos is the caret in the preedit, in bytes.
-    inline_cursor_pos = g_utf8_strlen(context.composition.preedit,
-                                      context.composition.cursor_pos);
-    inline_text->attrs = ibus_attr_list_new();
-    ibus_attr_list_append(
-        inline_text->attrs,
-        ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, inline_text_len));
-    if (has_highlighted_span) {
-      const guint start = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_start);
-      const glong end = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_end);
-      ibus_attr_list_append(
-          inline_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SELECTION, start, end));
-    }
-    preedit_offset = context.composition.length;
   }
 
-  // calculate auxiliary text
-  if (preedit_offset < context.composition.length) {
-    const char* preedit = context.composition.preedit + preedit_offset;
-    // The insertion mark goes into the line the panel draws, not into the text
-    // a client renders. It trails the text because the caret is at the end of
-    // the preedit here, which also leaves the attribute ranges below unchanged.
-    gchar* marked = g_strconcat(preedit, kCaretMark, NULL);
-    auxiliary_text = ibus_text_new_from_string(marked);
-    g_free(marked);
-    // glong preedit_len = g_utf8_strlen(preedit, -1);
-    // glong cursor_pos = g_utf8_strlen(
-    //    preedit, context.composition.cursor_pos - preedit_offset);
-    if (has_highlighted_span) {
-      auxiliary_text->attrs = ibus_attr_list_new();
-      const glong start = g_utf8_strlen(
-          preedit, context.composition.sel_start - preedit_offset);
-      const glong end = g_utf8_strlen(
-          preedit, context.composition.sel_end - preedit_offset);
+  const char* preedit =
+      context.composition.preedit ? context.composition.preedit : "";
+  if (g_ibus_rime_settings.aux_preedit && *preedit) {
+    auxiliary_text = ibus_text_new_from_string(preedit);
+    const guint preedit_len = ibus_text_get_length(auxiliary_text);
+    auxiliary_text->attrs = ibus_attr_list_new();
+    ibus_attr_list_append(
+        auxiliary_text->attrs,
+        ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, preedit_len));
+    // sel_start..sel_end is the active segment of the preedit, so it can be
+    // marked in the preedit; there is no such range in the raw input.
+    if (context.composition.sel_start < context.composition.sel_end) {
+      const guint start =
+          g_utf8_strlen(preedit, context.composition.sel_start);
+      const glong end = g_utf8_strlen(preedit, context.composition.sel_end);
       ibus_attr_list_append(
           auxiliary_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SUFFIX, start, end));
+          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SELECTION, start, end));
     }
   }
 
@@ -509,13 +463,9 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
         (IBusEngine *)rime_engine, inline_text, inline_cursor_pos, TRUE);
   } else {
     // send 0-length preedit to force cursor update dnd align the candidate panel
-    if (context.composition.length > 0) {
-      IBusText *empty = ibus_text_new_from_static_string("");
-      ibus_engine_update_preedit_text(
-          (IBusEngine *)rime_engine, empty, 0, TRUE);
-    } else {
-      ibus_engine_hide_preedit_text((IBusEngine *)rime_engine);
-    }
+    IBusText *empty = ibus_text_new_from_static_string("");
+    ibus_engine_update_preedit_text(
+        (IBusEngine *)rime_engine, empty, 0, TRUE);
   }
   if (auxiliary_text) {
     ibus_engine_update_auxiliary_text(
