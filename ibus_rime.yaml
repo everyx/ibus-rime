@@ -1,19 +1,29 @@
 # ibus-rime configuration
 
-config_version: '1.7'
+config_version: '2.0'
 
 style:
   # candidate list orientation (false|true).
   horizontal: true
 
-  # embed preedit text in the input field (false|true).
-  inline_preedit: true
+  # What the client draws inline (update_preedit_text):
+  #   composition: what the schema made of the input (tone marks, the script
+  #                the input is written to, the segments already converted)
+  #   raw:         the keys the user typed
+  #   preview:     the text the current candidate would commit
+  #   none:        nothing
+  preedit: composition
 
-  # `preedit_style` specifies what to display as inline preedit text.
-  # display inline the input under conversion.
-  #preedit_style: composition
-  # preview the converted text.
-  preedit_style: preview
+  # What the panel draws in the auxiliary line (update_auxiliary_text), same
+  # values. A composition owns the line while it lasts; the status hint uses it
+  # when idle.
+  auxiliary: none
+
+  # What happens to a composition when the focus leaves it:
+  #   cancel: discard it
+  #   commit: hand it to the client that is losing the focus
+  #           (IBUS_ENGINE_PREEDIT_COMMIT)
+  focus_out: cancel
 
   # display updated IME status at cursor position.
   status_hint: true

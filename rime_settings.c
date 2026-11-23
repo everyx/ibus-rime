@@ -6,11 +6,30 @@
 extern RimeApi *rime_api;
 
 static struct IBusRimeSettings ibus_rime_settings_default = {
-  .embed_preedit_text = TRUE,
-  .preedit_style = PREEDIT_STYLE_COMPOSITION,
+  .preedit = CHANNEL_COMPOSITION,
+  .auxiliary = CHANNEL_NONE,
+  .focus_out_behavior = FOCUS_OUT_CANCEL,
   .lookup_table_orientation = IBUS_ORIENTATION_SYSTEM,
   .status_hint = FALSE,
 };
+
+static gint
+parse_channel (const char* value)
+{
+  if (!value) {
+    return CHANNEL_NONE;
+  }
+  if (!strcmp(value, "composition")) {
+    return CHANNEL_COMPOSITION;
+  }
+  if (!strcmp(value, "raw")) {
+    return CHANNEL_RAW;
+  }
+  if (!strcmp(value, "preview")) {
+    return CHANNEL_PREVIEW;
+  }
+  return CHANNEL_NONE;
+}
 
 struct IBusRimeSettings g_ibus_rime_settings;
 
@@ -25,20 +44,21 @@ ibus_rime_load_settings()
     return;
   }
 
-  Bool inline_preedit = False;
-  if (rime_api->config_get_bool(
-          &config, "style/inline_preedit", &inline_preedit)) {
-    g_ibus_rime_settings.embed_preedit_text = !!inline_preedit;
+  const char* preedit = rime_api->config_get_cstring(&config, "style/preedit");
+  if (preedit) {
+    g_ibus_rime_settings.preedit = parse_channel(preedit);
   }
 
-  const char* preedit_style_str =
-      rime_api->config_get_cstring(&config, "style/preedit_style");
-  if(preedit_style_str) {
-    if(!strcmp(preedit_style_str, "composition")) {
-      g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_COMPOSITION;
-    } else if(!strcmp(preedit_style_str, "preview")) {
-      g_ibus_rime_settings.preedit_style = PREEDIT_STYLE_PREVIEW;
-    }
+  const char* auxiliary =
+      rime_api->config_get_cstring(&config, "style/auxiliary");
+  if (auxiliary) {
+    g_ibus_rime_settings.auxiliary = parse_channel(auxiliary);
+  }
+
+  const char* focus_out =
+      rime_api->config_get_cstring(&config, "style/focus_out");
+  if (focus_out && !strcmp(focus_out, "commit")) {
+    g_ibus_rime_settings.focus_out_behavior = FOCUS_OUT_COMMIT;
   }
 
   Bool horizontal = False;

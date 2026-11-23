@@ -7,10 +7,6 @@
 
 extern RimeApi *rime_api;
 
-// U+2038 CARET, the glyph rime's soft cursor inserts into the preedit. The
-// engine marks the insertion point itself, in the text the panel draws.
-static const gchar *const kCaretMark = "\xe2\x80\xb8";
-
 typedef struct _IBusRimeEngine IBusRimeEngine;
 typedef struct _IBusRimeEngineClass IBusRimeEngineClass;
 
@@ -197,6 +193,70 @@ ibus_rime_engine_destroy (IBusRimeEngine *rime_engine)
 
   ((IBusObjectClass *) ibus_rime_engine_parent_class)->destroy(
       (IBusObject *)rime_engine);
+}
+
+// Build the text one channel draws, with its caret and attributes, from the
+// current composition. Returns NULL when the channel draws nothing.
+//
+// CHANNEL_COMPOSITION is what the schema makes of the input, CHANNEL_RAW is what
+// the user typed, CHANNEL_PREVIEW is what the current candidate would commit.
+static IBusText*
+ibus_rime_compose_channel (IBusRimeEngine *rime_engine,
+                           const RimeContext *context,
+                           gint channel,
+                           guint *cursor_pos)
+{
+  const char* text = NULL;
+  guint cursor = 0;
+  gboolean mark_selection = FALSE;
+  gboolean cursor_at_end = FALSE;
+
+  switch (channel) {
+  case CHANNEL_COMPOSITION:
+    text = context->composition.preedit;
+    cursor = g_utf8_strlen(context->composition.preedit,
+                           context->composition.cursor_pos);
+    mark_selection = TRUE;
+    break;
+  case CHANNEL_RAW:
+    text = rime_api->get_input(rime_engine->session_id);
+    if (text) {
+      cursor = g_utf8_strlen(
+          text, rime_api->get_caret_pos(rime_engine->session_id));
+    }
+    break;
+  case CHANNEL_PREVIEW:
+    if (RIME_STRUCT_HAS_MEMBER(*context, context->commit_text_preview)) {
+      text = context->commit_text_preview;
+      cursor_at_end = TRUE;
+    }
+    break;
+  default:
+    return NULL;
+  }
+  if (!text || !*text) {
+    return NULL;
+  }
+
+  IBusText* ibus_text = ibus_text_new_from_string(text);
+  const guint length = ibus_text_get_length(ibus_text);
+  *cursor_pos = cursor_at_end ? length : MIN(cursor, length);
+  ibus_text->attrs = ibus_attr_list_new();
+  ibus_attr_list_append(
+      ibus_text->attrs,
+      ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, length));
+  // sel_start..sel_end is a range of the schema's pre-edit string; the raw
+  // input and the commit preview have no such range.
+  if (mark_selection &&
+      context->composition.sel_start < context->composition.sel_end) {
+    const guint start =
+        g_utf8_strlen(text, context->composition.sel_start);
+    const glong end = g_utf8_strlen(text, context->composition.sel_end);
+    ibus_attr_list_append(
+        ibus_text->attrs,
+        ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SELECTION, start, end));
+  }
+  return ibus_text;
 }
 
 // Take back everything this client is showing for the composition: the
@@ -419,103 +479,28 @@ static void ibus_rime_engine_update(IBusRimeEngine *rime_engine)
   // the composition below takes over the auxiliary text.
   g_clear_handle_id(&rime_engine->hint.timer_id, g_source_remove);
 
-  IBusText* inline_text = NULL;
-  IBusText* auxiliary_text = NULL;
-  guint inline_cursor_pos = 0;
-  int preedit_offset = 0;
+  // Each channel picks its own string; neither depends on the other.
+  guint preedit_cursor = 0;
+  IBusText* preedit_text = ibus_rime_compose_channel(
+      rime_engine, &context, g_ibus_rime_settings.preedit, &preedit_cursor);
+  guint auxiliary_cursor = 0;
+  IBusText* auxiliary_text = ibus_rime_compose_channel(
+      rime_engine, &context, g_ibus_rime_settings.auxiliary,
+      &auxiliary_cursor);
 
-  const gboolean has_highlighted_span =
-      (context.composition.sel_start < context.composition.sel_end);
+  // The mode decides what happens to the pre-edit when the focus leaves it:
+  // COMMIT hands it to the client losing the focus, CLEAR drops it.
+  IBusPreeditFocusMode preedit_mode =
+      g_ibus_rime_settings.focus_out_behavior == FOCUS_OUT_COMMIT ?
+      IBUS_ENGINE_PREEDIT_COMMIT : IBUS_ENGINE_PREEDIT_CLEAR;
 
-  // display preview text inline, if the commit_text_preview API is supported.
-  if (g_ibus_rime_settings.embed_preedit_text &&
-      g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_PREVIEW &&
-      RIME_STRUCT_HAS_MEMBER(context, context.commit_text_preview) &&
-      context.commit_text_preview) {
-    inline_text = ibus_text_new_from_string(context.commit_text_preview);
-    const guint inline_text_len = ibus_text_get_length(inline_text);
-    // The caret goes at the end of the text we send: clients put their own
-    // composition selection at cursor_pos and derive the range they replace
-    // from it, so it has to be a position inside that text.
-    inline_cursor_pos = inline_text_len;
-    inline_text->attrs = ibus_attr_list_new();
-    ibus_attr_list_append(
-        inline_text->attrs,
-        ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, inline_text_len));
-    // show the unconverted range of preedit text as auxiliary text
-    if (has_highlighted_span) {
-      preedit_offset = context.composition.sel_start;
-      const guint start = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_start);
-      const guint end = inline_text_len;
-      ibus_attr_list_append(
-          inline_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SUFFIX, start, end));
-    } else {
-      // hide auxiliary text
-      preedit_offset = context.composition.length;
-    }
-  }
-  // display preedit text inline
-  else if (g_ibus_rime_settings.embed_preedit_text &&
-           g_ibus_rime_settings.preedit_style == PREEDIT_STYLE_COMPOSITION) {
-    inline_text = ibus_text_new_from_string(context.composition.preedit);
-    const guint inline_text_len = ibus_text_get_length(inline_text);
-    // composition.cursor_pos is the caret in the preedit, in bytes.
-    inline_cursor_pos = g_utf8_strlen(context.composition.preedit,
-                                      context.composition.cursor_pos);
-    inline_text->attrs = ibus_attr_list_new();
-    ibus_attr_list_append(
-        inline_text->attrs,
-        ibus_attr_hint_new(IBUS_ATTR_PREEDIT_WHOLE, 0, inline_text_len));
-    if (has_highlighted_span) {
-      const guint start = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_start);
-      const glong end = g_utf8_strlen(
-          context.composition.preedit, context.composition.sel_end);
-      ibus_attr_list_append(
-          inline_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SELECTION, start, end));
-    }
-    preedit_offset = context.composition.length;
-  }
-
-  // calculate auxiliary text
-  if (preedit_offset < context.composition.length) {
-    const char* preedit = context.composition.preedit + preedit_offset;
-    // The insertion mark goes into the line the panel draws, not into the text
-    // a client renders. It trails the text because the caret is at the end of
-    // the preedit here, which also leaves the attribute ranges below unchanged.
-    gchar* marked = g_strconcat(preedit, kCaretMark, NULL);
-    auxiliary_text = ibus_text_new_from_string(marked);
-    g_free(marked);
-    // glong preedit_len = g_utf8_strlen(preedit, -1);
-    // glong cursor_pos = g_utf8_strlen(
-    //    preedit, context.composition.cursor_pos - preedit_offset);
-    if (has_highlighted_span) {
-      auxiliary_text->attrs = ibus_attr_list_new();
-      const glong start = g_utf8_strlen(
-          preedit, context.composition.sel_start - preedit_offset);
-      const glong end = g_utf8_strlen(
-          preedit, context.composition.sel_end - preedit_offset);
-      ibus_attr_list_append(
-          auxiliary_text->attrs,
-          ibus_attr_hint_new(IBUS_ATTR_PREEDIT_SUFFIX, start, end));
-    }
-  }
-
-  if (inline_text) {
-    ibus_engine_update_preedit_text(
-        (IBusEngine *)rime_engine, inline_text, inline_cursor_pos, TRUE);
-  } else {
-    // send 0-length preedit to force cursor update dnd align the candidate panel
-    if (context.composition.length > 0) {
-      IBusText *empty = ibus_text_new_from_static_string("");
-      ibus_engine_update_preedit_text(
-          (IBusEngine *)rime_engine, empty, 0, TRUE);
-    } else {
-      ibus_engine_hide_preedit_text((IBusEngine *)rime_engine);
-    }
+  // Nothing to draw means no signal at all: visible=TRUE would announce a
+  // pre-edit the client should render, and the caret rectangle the panel
+  // positions from belongs to the client, which reports it on its own.
+  if (preedit_text) {
+    ibus_engine_update_preedit_text_with_mode(
+        (IBusEngine *)rime_engine, preedit_text, preedit_cursor, TRUE,
+        preedit_mode);
   }
   if (auxiliary_text) {
     ibus_engine_update_auxiliary_text(
